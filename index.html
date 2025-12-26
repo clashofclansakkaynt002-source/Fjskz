@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic 3D Dice</title>
+    <style>
+        body { margin: 0; overflow: hidden; transition: background-color 5s linear; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none; z-index: 10;
+        }
+        #result {
+            font-family: 'Arial', sans-serif; font-size: 140px; font-weight: 900;
+            color: white; text-shadow: 0 0 30px rgba(0,0,0,0.3);
+            opacity: 0; transition: 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform: scale(0.5);
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui"><div id="result"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+<script>
+    let scene, camera, renderer, dice;
+    let isRolling = false;
+    const resultEl = document.getElementById('result');
+
+    // Карта поворотів для граней (щоб випадала потрібна сторона)
+    const rotations = [
+        { d: 1, x: 0, y: 0 },         // Передня (1)
+        { d: 6, x: Math.PI, y: 0 },    // Задня (6)
+        { d: 2, x: 0, y: -Math.PI/2 }, // Права (2)
+        { d: 5, x: 0, y: Math.PI/2 },  // Ліва (5)
+        { d: 3, x: -Math.PI/2, y: 0 }, // Верхня (3)
+        { d: 4, x: Math.PI/2, y: 0 }   // Нижня (4)
+    ];
+
+    function createDiceFace(number) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        // Фон грані (білий з легким градієнтом)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 256, 256);
+
+        // Малюємо точки
+        ctx.fillStyle = '#111111';
+        const dots = {
+            1: [[128, 128]],
+            2: [[64, 64], [192, 192]],
+            3: [[64, 64], [128, 128], [192, 192]],
+            4: [[64, 64], [192, 64], [64, 192], [192, 192]],
+            5: [[64, 64], [192, 64], [128, 128], [64, 192], [192, 192]],
+            6: [[64, 64], [192, 64], [64, 128], [192, 128], [64, 192], [192, 192]]
+        };
+
+        dots[number].forEach(pos => {
+            ctx.beginPath();
+            ctx.arc(pos[0], pos[1], 25, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        const texture = new THREE.CanvasTexture(canvas);
+        return new THREE.MeshPhongMaterial({ map: texture, shininess: 50 });
+    }
+
+    function init() {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 8;
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Створення куба з матеріалами для кожної сторони
+        const materials = [1, 2, 3, 4, 5, 6].map(n => createDiceFace(n));
+        
+        // Використовуємо BoxGeometry, але Three.js не має вбудованого "RoundedBox". 
+        // Щоб досягти ефекту заокруглення без важких бібліотек, ми додамо багато сегментів
+        const geometry = new THREE.BoxGeometry(2, 2, 2, 10, 10, 10); 
+        dice = new THREE.Mesh(geometry, materials);
+        scene.add(dice);
+
+        // Світло
+        const light1 = new THREE.DirectionalLight(0xffffff, 1);
+        light1.position.set(5, 5, 5);
+        scene.add(light1);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+        animateBackground();
+        window.addEventListener('mousedown', handleInteraction);
+        window.addEventListener('touchstart', handleInteraction);
+        animate();
+    }
+
+    function animateBackground() {
+        const bg = () => {
+            gsap.to('body', { backgroundColor: "#ffff00", duration: 5, ease: "linear", onComplete: () => {
+                gsap.to('body', { backgroundColor: "#8000ff", duration: 5, ease: "linear", onComplete: bg });
+            }});
+        };
+        document.body.style.backgroundColor = "#8000ff";
+        bg();
+    }
+
+    function handleInteraction() {
+        if (resultEl.style.opacity === "1") {
+            gsap.to(resultEl, { opacity: 0, scale: 0.5, duration: 0.3 });
+            return;
+        }
+        if (!isRolling) rollDice();
+    }
+
+    function rollDice() {
+        isRolling = true;
+        const target = rotations[Math.floor(Math.random() * rotations.length)];
+
+        // Анімація підкидання (плавне падіння)
+        gsap.to(dice.position, {
+            y: 2, duration: 0.7, ease: "power2.out", yoyo: true, repeat: 1
+        });
+
+        // Обертання (багато обертів + фінальний кут)
+        gsap.to(dice.rotation, {
+            x: target.x + Math.PI * 6,
+            y: target.y + Math.PI * 6,
+            duration: 1.4,
+            ease: "power3.inOut",
+            onComplete: () => {
+                isRolling = false;
+                resultEl.innerText = target.d;
+                gsap.to(resultEl, { opacity: 1, scale: 1, duration: 0.5 });
+            }
+        });
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if(!isRolling) {
+            dice.rotation.y += 0.005;
+        }
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    init();
+</script>
+</body>
+</html>
